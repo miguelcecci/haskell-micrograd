@@ -23,42 +23,6 @@ pretty (Operation (Value a b) Diff x y) = "  ("++ pretty x ++" Diff(" ++ show a 
 
 -- LEAF Value Grad
 
---test values
-ta = newValue 5
-tb = newValue 2
-tc = newValue (3)
-i1 = newInput 0
-i2 = newInput 1
-
-optest = newOperation Multiply ta i1
-optest2 = newOperation Multiply tb i2
-optest3 = newOperation Add optest optest2
-
-op0 = newOperation Multiply tb tc
-op1 = newOperation Add op0 ta
-op2 = newOperation Relu op1 op1
-
-c1 = newConstant 4
-op3 = newOperation Diff op0 c1
---op3 = setGrad (-1) op2
---op4 = backward op3
-
---testes sensacionais
-
-const1 = newConstant 4
-const2 = newConstant 2
-var1 = newValue 2
-var2 = newValue 4
-
-operationAdd = newOperation Add const1 var1
-operationMul = newOperation Multiply const1 var1
-operationDiff = newOperation Diff const1 var1
-operationDiff2 = newOperation Diff const2 var2
-operationDiffMul = newOperation Diff const1 operationMul
-operationDiffAdd = newOperation Diff const1 operationAdd
-
-neuron = newOperation Diff op2 c1
-
 newInput id = newOperation Input va va
   where va = Value 0 id
 
@@ -69,6 +33,10 @@ newConstant a = newOperation Constant va va
 newValue :: Float -> GradTree
 newValue a = Value a 1
 
+newActivation :: OperationType -> GradTree -> GradTree
+newActivation Relu a = newOperation Relu a Empty
+newActivation Sigmoid a = newOperation Sigmoid a Empty
+
 newOperation :: OperationType -> GradTree -> GradTree -> GradTree
 newOperation Add a b = Operation (Value (va+vb) 1) Add a b
   where va = getValue a
@@ -76,9 +44,9 @@ newOperation Add a b = Operation (Value (va+vb) 1) Add a b
 newOperation Multiply a b = Operation (Value (va*vb) 1) Multiply a b
   where va = getValue a
         vb = getValue b
-newOperation Relu a b = Operation (Value (if va >= 0 then va else 0) 1) Relu a Empty
+newOperation Relu a Empty = Operation (Value (if va >= 0 then va else 0) 1) Relu a Empty
   where va = getValue a
-newOperation Sigmoid a b = Operation (Value (1/(1+2.718281**(-va))) 1) Sigmoid a Empty
+newOperation Sigmoid a Empty = Operation (Value (1/(1+2.718281**(-va))) 1) Sigmoid a Empty
   where va = getValue a
 newOperation Constant a b = Operation a Constant a Empty
 newOperation Diff a b = Operation (Value (dif**2) (-dif*2)) Diff a b
@@ -100,7 +68,11 @@ reversalInsertInputs (x:inputList) tree = if ((==) 0 $ length inputList) then ne
   where newTree = setInput (length inputList) x tree
 
 insertInputs :: [Float] -> GradTree -> GradTree
-insertInputs inputList tree = reversalInsertInputs (reverse inputList) tree
+insertInputs inputList tree = forward $ reversalInsertInputs (reverse inputList) tree --executing forward propagation after insert new inputs
+
+-- Manipulating leaves
+--
+--
 
 getBoth :: GradTree -> GradTree 
 getBoth (Operation a _ _ _) = a
@@ -126,6 +98,10 @@ setGrad value Empty = Empty
 setGrad grad (Value value _) = Value value grad
 setGrad grad (Operation (Value value _) op a b) = Operation (Value value grad) op a b
 
+-- Backpropagation
+--
+--
+
 backward :: GradTree -> GradTree
 backward Empty = Empty
 backward (Value x xg) = Value x xg
@@ -145,20 +121,26 @@ backMse a b = -((getValue a) - (getValue b))*2
 backAdd :: GradTree -> Float
 backAdd out = (getGrad out)
 
---backAdd :: GradTree -> GradTree -> Float
---backAdd out value = (getValue value) + (getGrad out)
-
 backMultiply :: GradTree -> GradTree -> Float
 backMultiply out value = (getValue value) * (getGrad out)
 
 backRelu :: GradTree -> Float
 backRelu out = (getGrad out) * (fromIntegral $ fromEnum ((getValue out) > 0.0))
 
+-- Update weights
+--
+--
+
 updateValues :: Float -> GradTree -> GradTree
 updateValues learningRate (Value x xg) = Value (x-learningRate*xg) xg -- subtracting learningRate*grad from weights to get closer to minima
 updateValues learningRate (Operation out Constant a b) = Operation out Constant a b
 updateValues learningRate (Operation out op a b) = Operation out op (updateValues learningRate a) (updateValues learningRate b)
 updateValues learningRate Empty = Empty
+
+
+-- Forward Propagation
+--
+--
 
 forward :: GradTree -> GradTree
 forward Empty = Empty
@@ -167,6 +149,10 @@ forward (Operation out op a b) = Operation (getBoth $ newOperation op ua ub) op 
   where ua = forward a
         ub = forward b
 forward value = value
+
+-- OptimizationPipeline
+--
+--
 
 optimizationPipeline :: Float -> GradTree -> GradTree
 optimizationPipeline learningRate tree = forward $ updateValues learningRate $ backward tree
