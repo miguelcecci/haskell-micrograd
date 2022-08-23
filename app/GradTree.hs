@@ -1,6 +1,8 @@
 module GradTree where
 
-data OperationType = Input | Constant | Add | Multiply | Relu | Sigmoid | Output | Diff deriving (Show, Eq)
+import Data.List
+
+data OperationType = Input | Constant | Add | Multiply | Pow | Relu | Sigmoid | Variable | Mse deriving (Show, Eq)
 data GradTree = Empty | Value Float Float | Operation GradTree OperationType GradTree GradTree deriving Show
 
 pretty :: GradTree -> String
@@ -10,7 +12,7 @@ pretty (Operation (Value a b) Input _ _) = " I(" ++ show a ++","++ show b ++") "
 pretty (Operation (Value a b) Multiply x y) = "  ("++ pretty x ++" Multiply(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
 pretty (Operation (Value a b) Add x y) = "  ("++ pretty x ++" Add(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
 pretty (Operation (Value a b) Relu x y) = " (Relu(" ++ show a ++","++ show b ++") "++ pretty x ++")  "
-pretty (Operation (Value a b) Diff x y) = "  ("++ pretty x ++" Diff(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
+pretty (Operation (Value a b) Mse x y) = "  ("++ pretty x ++" Mse(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
 
 -- Structure sketch
 --
@@ -31,29 +33,32 @@ newConstant a = newOperation Constant va va
   where va = Value a 0
 
 newValue :: Float -> GradTree
-newValue a = Value a 1
+newValue a = Value a 0
 
 newActivation :: OperationType -> GradTree -> GradTree
 newActivation Relu a = newOperation Relu a Empty
 newActivation Sigmoid a = newOperation Sigmoid a Empty
 
 newOperation :: OperationType -> GradTree -> GradTree -> GradTree
-newOperation Add a b = Operation (Value (va+vb) 1) Add a b
+newOperation Add a b = Operation (Value (va+vb) 0) Add a b
   where va = getValue a
         vb = getValue b
-newOperation Multiply a b = Operation (Value (va*vb) 1) Multiply a b
+newOperation Multiply a b = Operation (Value (va*vb) 0) Multiply a b
   where va = getValue a
         vb = getValue b
-newOperation Relu a Empty = Operation (Value (if va >= 0 then va else 0) 1) Relu a Empty
+newOperation Pow a b = Operation (Value (va**vb) 0) Pow a b
   where va = getValue a
-newOperation Sigmoid a Empty = Operation (Value (1/(1+2.718281**(-va))) 1) Sigmoid a Empty
+        vb = getValue b
+newOperation Relu a Empty = Operation (Value (if va >= 0 then va else 0) 0) Relu a Empty
+  where va = getValue a
+newOperation Sigmoid a Empty = Operation (Value (1/(1+2.718281**(-va))) 0) Sigmoid a Empty
   where va = getValue a
 newOperation Constant a b = Operation a Constant a Empty
-newOperation Diff a b = Operation (Value (dif**2) (-dif*2)) Diff a b
+newOperation Mse a b = Operation (Value (dif**2) (-dif*2)) Mse a b
   where va = getValue a
         vb = getValue b
         dif = (va-vb)
-newOperation Input a b = Operation (Value 1 id) Input Empty Empty
+newOperation Input a b = Operation (Value 0 id) Input Empty Empty
   where id = getGrad a
 
 setInput :: Int -> Float -> GradTree -> GradTree
@@ -70,9 +75,18 @@ reversalInsertInputs (x:inputList) tree = if ((==) 0 $ length inputList) then ne
 insertInputs :: [Float] -> GradTree -> GradTree
 insertInputs inputList tree = forward $ reversalInsertInputs (reverse inputList) tree --executing forward propagation after insert new inputs
 
+
 -- Manipulating leaves
 --
 --
+
+getOutput :: GradTree -> Float
+getOutput (Operation out Mse a b) = if (elemIndex (getOp a) [Input, Constant, Mse]) == Nothing then getValue a else getValue b
+getOutput value = 0.0000
+
+getOp :: GradTree -> OperationType
+getOp (Operation _ op _ _) = op
+getOp a = Variable
 
 getBoth :: GradTree -> GradTree 
 getBoth (Operation a _ _ _) = a
@@ -98,6 +112,16 @@ setGrad value Empty = Empty
 setGrad grad (Value value _) = Value value grad
 setGrad grad (Operation (Value value _) op a b) = Operation (Value value grad) op a b
 
+addGrad :: Float -> GradTree -> GradTree
+addGrad value Empty = Empty
+addGrad newGrad (Value value grad) = Value value newGrad+grad
+addGrad newGrad (Operation (Value value grad) op a b) = Operation (Value value newGrad+grad) op a b
+
+resetAllGrads :: GradTree -> GradTree
+resetAllGrads Empty = Empty
+resetAllGrads (Value value grad) = Value value 0
+resetAllGrads (Operation (Value value grad) Input a b) = Operation (Value value grad) Input a b
+resetAllGrads (Operation (Value value grad) op a b) = Operation (Value value 0) op (resetAllGrads a) (resetAllGrads b)
 -- Backpropagation
 --
 --
@@ -107,10 +131,11 @@ backward Empty = Empty
 backward (Value x xg) = Value x xg
 backward (Operation out Add a b) = Operation out Add (backward $ (setGrad (backAdd out) a)) (backward $ (setGrad (backAdd out) b))
 backward (Operation out Multiply a b) = Operation out Multiply (backward $ (setGrad (backMultiply out b) a)) (backward $ (setGrad (backMultiply out a) b))
+backward (Operation out Pow a b) = Operation out Pow (backward $ (setGrad (backPow out a b) a)) (backward $ (setGrad (backPow out b a) b))
 backward (Operation out Relu a b) = Operation out Relu (backward $ (setGrad (backRelu out) a)) b
 backward (Operation out Constant a b) = Operation out Constant (backward $ (setGrad (backConstant out) a)) b
 backward (Operation out Input a b) = Operation out Input a b
-backward (Operation out Diff a b) = Operation (setGrad 0 out) Diff (backward $ (setGrad (backMse b a) a)) (backward $ (setGrad (backMse a b) b))
+backward (Operation out Mse a b) = Operation (setGrad 0 out) Mse (backward $ (setGrad (backMse b a) a)) (backward $ (setGrad (backMse a b) b))
 
 backConstant :: GradTree -> Float
 backConstant out = 0
@@ -123,6 +148,12 @@ backAdd out = (getGrad out)
 
 backMultiply :: GradTree -> GradTree -> Float
 backMultiply out value = (getValue value) * (getGrad out)
+
+backPow :: GradTree -> GradTree -> GradTree -> Float
+backPow out a b = (vb * va**(vb-1))*go
+  where va = getValue a
+        vb = getValue b
+        go = getGrad out
 
 backRelu :: GradTree -> Float
 backRelu out = (getGrad out) * (fromIntegral $ fromEnum ((getValue out) > 0.0))
