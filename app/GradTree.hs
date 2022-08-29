@@ -2,7 +2,7 @@ module GradTree where
 
 import Data.List
 
-data OperationType = Input | Constant | Add | Multiply | Pow | Relu | Sigmoid | Variable | Mae | Mse deriving (Show, Eq)
+data OperationType = Input | Constant | Add | Multiply | Pow | Relu | Sigmoid | Variable | AbsoluteError | SquaredError deriving (Show, Eq)
 data GradTree = Empty | Value Float Float | Operation GradTree OperationType GradTree GradTree deriving Show
 
 pretty :: GradTree -> String
@@ -12,8 +12,8 @@ pretty (Operation _ Input (Value a b) _) = " I(" ++ show a ++","++ show b ++") "
 pretty (Operation (Value a b) Multiply x y) = "  ("++ pretty x ++" Multiply(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
 pretty (Operation (Value a b) Add x y) = "  ("++ pretty x ++" Add(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
 pretty (Operation (Value a b) Relu x y) = " (Relu(" ++ show a ++","++ show b ++") "++ pretty x ++")  "
-pretty (Operation (Value a b) Mse x y) = "  ("++ pretty x ++" Mse(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
-pretty (Operation (Value a b) Mae x y) = "  ("++ pretty x ++" Mae(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
+pretty (Operation (Value a b) SquaredError x y) = "  ("++ pretty x ++" SquaredError(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
+pretty (Operation (Value a b) AbsoluteError x y) = "  ("++ pretty x ++" AbsoluteError(" ++ show a ++","++ show b ++") "++ pretty y ++")  "
 
 -- Structure sketch
 --
@@ -55,11 +55,11 @@ newOperation Relu a Empty = Operation (Value (if va >= 0 then va else 0) 0) Relu
 newOperation Sigmoid a Empty = Operation (Value (1/(1+2.718281**(-va))) 0) Sigmoid a Empty
   where va = getValue a
 newOperation Constant a b = Operation a Constant a Empty
-newOperation Mae a b = Operation (Value (abs dif) (-dif)) Mae a b
+newOperation AbsoluteError a b = Operation (Value (abs dif) (-dif)) AbsoluteError a b
   where va = getValue a
         vb = getValue b
         dif = (va-vb)
-newOperation Mse a b = Operation (Value (dif**2) (-dif*2)) Mse a b
+newOperation SquaredError a b = Operation (Value (dif**2) (-dif*2)) SquaredError a b
   where va = getValue a
         vb = getValue b
         dif = (va-vb)
@@ -85,10 +85,22 @@ insertInputs inputList tree = forward $ reversalInsertInputs (reverse inputList)
 --
 --
 
+--- Todo throw error messages
+--
+insertError :: GradTree -> Float -> GradTree
+insertError (Operation out SquaredError a b) error = Operation (setValue error out) SquaredError a b
+insertError (Operation out AbsoluteError a b) error = Operation (setValue error out) AbsoluteError a b
+insertError _ _ = newValue 0
+
+getError :: GradTree -> Float
+getError (Operation out SquaredError a b) = getValue out
+getError (Operation out AbsoluteError a b) = getValue out
+getError _ = 0.0000
+
 getOutput :: GradTree -> Float
-getOutput (Operation out Mse a b) = if (elemIndex (getOp a) [Input, Constant]) == Nothing then getValue a else getValue b
-getOutput (Operation out Mae a b) = if (elemIndex (getOp a) [Input, Constant]) == Nothing then getValue a else getValue b
-getOutput value = 0.0000
+getOutput (Operation out SquaredError a b) = if (elemIndex (getOp a) [Input, Constant]) == Nothing then getValue a else getValue b
+getOutput (Operation out AbsoluteError a b) = if (elemIndex (getOp a) [Input, Constant]) == Nothing then getValue a else getValue b
+getOutput _ = 0.0000
 
 getOp :: GradTree -> OperationType
 getOp (Operation _ op _ _) = op
@@ -142,17 +154,17 @@ backward (Operation out Pow a b) = Operation out Pow (backward $ (addGrad (backP
 backward (Operation out Relu a b) = Operation out Relu (backward $ (addGrad (backRelu out) a)) b
 backward (Operation out Constant a b) = Operation out Constant (backward $ (addGrad (backConstant out) a)) b
 backward (Operation out Input a b) = Operation out Input a b
-backward (Operation out Mse a b) = Operation (setGrad 0 out) Mse (backward $ (addGrad (backMse b a) a)) (backward $ (addGrad (backMse a b) b))
-backward (Operation out Mae a b) = Operation (setGrad 0 out) Mae (backward $ (addGrad (backMae b a) a)) (backward $ (addGrad (backMae a b) b))
+backward (Operation out SquaredError a b) = Operation (setGrad 0 out) SquaredError (backward $ (setGrad (backSquaredError b a) a)) (backward $ (setGrad (backSquaredError a b) b))
+backward (Operation out AbsoluteError a b) = Operation (setGrad 0 out) AbsoluteError (backward $ (setGrad (backAbsoluteError b a) a)) (backward $ (setGrad (backAbsoluteError a b) b))
 
 backConstant :: GradTree -> Float
 backConstant out = 0
 
-backMse :: GradTree -> GradTree -> Float
-backMse a b = -((getValue a) - (getValue b))*2
+backSquaredError :: GradTree -> GradTree -> Float
+backSquaredError a b = -((getValue a) - (getValue b))*2
 
-backMae :: GradTree -> GradTree -> Float
-backMae a b = -((getValue a) - (getValue b))
+backAbsoluteError :: GradTree -> GradTree -> Float
+backAbsoluteError a b = -((getValue a) - (getValue b))
 
 backAdd :: GradTree -> Float
 backAdd out = (getGrad out)
