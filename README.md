@@ -1,9 +1,9 @@
 # Recursive grads
 
-Implementation of gradient optmization micro framework in haskell
+Implementation of gradient optimization micro-framework in Haskell
 
-The framwork uses binary tree for the operations, and performs forward
-and backprop recursively.
+The framework uses a binary tree for the operations and performs forward
+and back propropagation recursively.
 
 Example:
 ```haskell
