@@ -27,8 +27,9 @@ runPrediction :: GradTree -> [Float] -> Float
 runPrediction model input = getOutput $ insertInputs input model
 
 
-batchGradientDescent :: GradTree -> [[Float]] -> Float -> GradTree
-batchGradientDescent model batch learningRate = subtractGradients learningRate $ backward $ (insertError model (calculateMeanBatchError model batch) )
+-- to do
+-- batchGradientDescent :: GradTree -> [[Float]] -> Float -> GradTree
+-- batchGradientDescent model batch learningRate = subtractGradients learningRate $ backward $ (insertError model (calculateMeanBatchError model batch) )
 
 -- check model: to do
 -- verify if model is a neural net
